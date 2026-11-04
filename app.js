@@ -10,8 +10,8 @@
    ========================================================================== */
 
 import { marked } from './vendor/marked.esm.js';
-import DOMPurify from './vendor/purify.es.mjs';
-import { MARKED_OPTIONS, PURIFY_CFG, SAFE_HREF } from './lib/sanitize-config.mjs';
+import DOMPurify from './vendor/purify.es.js';
+import { MARKED_OPTIONS, PURIFY_CFG, SAFE_HREF } from './lib/sanitize-config.js';
 
 /* ------------------------------------------------------------------ config */
 
@@ -48,6 +48,8 @@ const themeBtn    = $('#theme-toggle');
 /** @type {{role:'user'|'assistant', content:string, ts:number}[]} */
 let history   = loadHistory();
 let abortCtrl = null;          // non-null while streaming (H7)
+let clientDemo = false;        // static hosting: no backend, answer in-browser
+let demoMod = null;            // lazily-imported lib/demo-mentor.js
 const handles = new WeakMap(); // message object -> bubble handle (for action refresh)
 
 /* ------------------------------------------------------------------ utils */
@@ -110,7 +112,7 @@ async function typesetMath(root) {
         document.head.appendChild(link);
       }
       const [{ default: renderMathInElement }] = await Promise.all([
-        import('./vendor/katex/contrib/auto-render.mjs'),  // imports katex.mjs itself
+        import('./vendor/katex/contrib/auto-render.js'),  // imports katex.js itself
       ]);
       return renderMathInElement;
     })();
@@ -296,6 +298,25 @@ async function streamReply(payload, onToken, signal) {
 
 /* ------------------------------------------------------------------ send */
 
+/**
+ * Static-host fallback (e.g. GitHub Pages): no backend exists, so answer
+ * in-browser with the built-in FAQ and stream it locally. Same SSE-shaped
+ * token callback as the network path, and honours AbortController.
+ */
+async function streamDemoLocal(payload, onToken, signal) {
+  if (!demoMod) throw new Error('The built-in demo engine failed to load.');
+  const answer = demoMod.answerFor(payload.messages);
+  const chunks = answer.match(/[\s\S]{1,28}/g) || [answer];
+  let acc = '';
+  for (const c of chunks) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    acc += c;
+    onToken(acc);
+    await new Promise((r) => setTimeout(r, 14));
+  }
+  return acc;
+}
+
 function setBusy(busy) {
   sendBtn.disabled = busy;                       // H7 in-flight lock
   stopBtn.hidden = !busy;
@@ -326,7 +347,8 @@ async function sendUserText(text) {
   let lastPaint = 0;
 
   try {
-    answer = await streamReply(payload, (acc) => {
+    const streamer = clientDemo ? streamDemoLocal : streamReply;
+    answer = await streamer(payload, (acc) => {
       // Plain text while streaming (fast, no per-token sanitise cost);
       // the rich markdown + maths render happens once, on completion.
       const now = performance.now();
@@ -492,6 +514,14 @@ addEventListener('offline', () => { offlineB.hidden = false; });
 
 /* ------------------------------------------------------------------ boot */
 
+/** No backend present (static hosting): answer in-browser, labelled as demo. */
+async function enableClientDemo() {
+  clientDemo = true;
+  demoMod = await import('./lib/demo-mentor.js').catch(() => null);
+  demoB.hidden = false;
+  engineLabel.textContent = 'Demo FAQ \u00b7 in-browser';
+}
+
 async function boot() {
   initTheme();
   if (!navigator.onLine) offlineB.hidden = false;
@@ -508,6 +538,8 @@ async function boot() {
     }).setActions([]);
   }
 
+  // Detect the engine. On a static host (GitHub Pages) there is no /api at all,
+  // so fall back to answering in-browser rather than showing "unreachable".
   try {
     const res = await fetch('api/config');
     if (res.ok) {
@@ -515,8 +547,10 @@ async function boot() {
       demoB.hidden = !cfg.demo;
       engineLabel.textContent = cfg.demo ? 'Demo FAQ \u00b7 no API key'
                                          : `${cfg.model || 'DeepSeek'} \u00b7 connected`;
-    } else engineLabel.textContent = 'Server unreachable';
-  } catch { engineLabel.textContent = 'Server unreachable'; }
+    } else {
+      await enableClientDemo();
+    }
+  } catch { await enableClientDemo(); }
 
   autosize();
   input.focus();

@@ -52,7 +52,7 @@ The browser **never** sees `DEEPSEEK_API_KEY`. It posts the conversation to
 `/api/chat`; the server whitelists the message shape, prepends a server-side
 system prompt, rate-limits per IP, and relays DeepSeek's server-sent-events
 stream back untouched. If no key is configured the same SSE contract is served
-by `lib/demo-mentor.mjs` so the UI is fully exercisable without a paid key.
+by `lib/demo-mentor.js` so the UI is fully exercisable without a paid key.
 
 ### Project layout
 
@@ -61,8 +61,8 @@ index.html            semantic, accessible shell (split out of the old monolith)
 styles.css            design tokens, dark+light themes, contrast-verified
 app.js                frontend: streaming, sanitised markdown, lazy KaTeX, a11y
 server.mjs            zero-dep Node proxy + static host + security headers
-lib/demo-mentor.mjs   offline FAQ used when no API key is set
-lib/sanitize-config.mjs  the ONE markdown/DOMPurify config, shared with tests
+lib/demo-mentor.js   offline FAQ used when no API key is set
+lib/sanitize-config.js  the ONE markdown/DOMPurify config, shared with tests
 sw.js                 network-first service worker (offline shell)
 manifest.webmanifest  installable-PWA manifest
 public/               generated app icons (192 / 512 / maskable / apple-touch)

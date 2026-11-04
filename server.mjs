@@ -17,7 +17,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
-import { answerFor } from './lib/demo-mentor.mjs';
+import { answerFor } from './lib/demo-mentor.js';
 
 // fileURLToPath leaves a trailing slash on directory URLs and normalize() keeps
 // it, which would break the ROOT+sep containment check below — strip it.
@@ -49,7 +49,9 @@ const MIME = {
 };
 
 // Never serve these, even though some match the extension allow-list.
-const DENY = ['/lib/', '/tests/', '/.git', '/node_modules', '/server.mjs',
+// NOTE: /lib/ is intentionally NOT denied — it holds the isomorphic modules the
+// browser imports (sanitize-config, demo-mentor). Server-only files stay denied.
+const DENY = ['/tests/', '/.git', '/node_modules', '/server.mjs',
               '/package-lock.json', '/.env', '/AUDIT.md'];
 
 /* ------------------------------------------------------------ rate limit */

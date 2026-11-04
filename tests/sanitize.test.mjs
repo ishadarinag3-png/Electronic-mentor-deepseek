@@ -1,5 +1,5 @@
 /* Renderer-pipeline security tests.
-   Exercises the EXACT config the browser uses (lib/sanitize-config.mjs) —
+   Exercises the EXACT config the browser uses (lib/sanitize-config.js) —
    marked -> DOMPurify — against hostile LLM-shaped output. (AUDIT.md §2 / M8)
    A DOM is supplied via jsdom; no browser required. */
 
@@ -20,8 +20,8 @@ before(async () => {
 
   const [{ marked }, purifyMod, { MARKED_OPTIONS, PURIFY_CFG }] = await Promise.all([
     import(VENDOR('marked.esm.js')),
-    import(VENDOR('purify.es.mjs')),
-    import(new URL('../lib/sanitize-config.mjs', import.meta.url)),
+    import(VENDOR('purify.es.js')),
+    import(new URL('../lib/sanitize-config.js', import.meta.url)),
   ]);
   marked.setOptions(MARKED_OPTIONS);
 

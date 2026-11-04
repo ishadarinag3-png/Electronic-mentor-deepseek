@@ -135,6 +135,22 @@ test('vendor assets are cache-immutable; shell is no-cache', async () => {
   assert.match(s.headers.get('cache-control'), /no-cache/);
 });
 
+// Regression: the browser imports ./lib/*.js from app.js. A DENY rule on /lib/
+// once 403'd them, silently breaking the whole module graph in a real browser
+// while every top-level asset still returned 200. Assert the full graph loads.
+test('every module the browser imports is servable (module graph)', async () => {
+  const mods = ['/app.js', '/vendor/marked.esm.js', '/vendor/purify.es.js',
+                '/lib/sanitize-config.js', '/lib/demo-mentor.js'];
+  for (const p of mods) {
+    const res = await fetch(BASE + p);
+    assert.equal(res.status, 200, `${p} must be servable`);
+    assert.match(res.headers.get('content-type'), /javascript/);
+  }
+  for (const p of ['/styles.css', '/manifest.webmanifest', '/sw.js', '/public/icon-192.png']) {
+    assert.equal((await fetch(BASE + p)).status, 200, `${p} must be servable`);
+  }
+});
+
 // NOTE: keep last — it exhausts the per-IP rate bucket for this process.
 test('rate limiting kicks in past 20 requests/minute (C2)', async () => {
   const body = JSON.stringify({ messages: [{ role: 'user', content: 'ohms law' }] });

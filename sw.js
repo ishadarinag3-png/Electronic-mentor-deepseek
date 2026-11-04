@@ -14,7 +14,7 @@ const SHELL = [
   './public/icon-192.png',
   './public/icon-512.png',
   './vendor/marked.esm.js',
-  './vendor/purify.es.mjs',
+  './vendor/purify.es.js',
 ];
 
 self.addEventListener('install', (event) => {
