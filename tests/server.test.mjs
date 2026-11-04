@@ -16,7 +16,8 @@ let child;
 before(async () => {
   child = spawn(process.execPath, ['server.mjs'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), DEEPSEEK_API_KEY: '' },
+    // E2B_SANDBOX_ID cleared so frame-ancestors is deterministically 'none' here.
+    env: { ...process.env, PORT: String(PORT), DEEPSEEK_API_KEY: '', E2B_SANDBOX_ID: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Wait for the listen line.
@@ -38,7 +39,9 @@ test('GET / serves the shell with security headers (M9)', async () => {
   assert.match(csp, /script-src 'self'/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  // No X-Frame-Options: CSP frame-ancestors governs framing, and a DENY header
+  // would block the sandbox live-preview iframe.
+  assert.equal(res.headers.get('x-frame-options'), null);
   assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
   const html = await res.text();
   assert.match(html, /<html lang="en">/);

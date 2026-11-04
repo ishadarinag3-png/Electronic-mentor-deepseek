@@ -22,6 +22,12 @@ import { answerFor } from './lib/demo-mentor.js';
 // fileURLToPath leaves a trailing slash on directory URLs and normalize() keeps
 // it, which would break the ROOT+sep containment check below — strip it.
 const ROOT = normalize(fileURLToPath(new URL('.', import.meta.url))).replace(/[/\\]+$/, '');
+
+// The Arena live-preview embeds this app in an iframe on the sandbox proxy host.
+// Allow exactly that origin (and nowhere else); outside the sandbox stay 'none'.
+const FRAME_ANCESTORS = process.env.E2B_SANDBOX_ID
+  ? `'self' https://${process.env.PORT || 8080}-${process.env.E2B_SANDBOX_ID}.e2b.app`
+  : "'none'";
 const PORT = Number(process.env.PORT || 8080);
 const KEY  = process.env.DEEPSEEK_API_KEY || '';
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -235,12 +241,13 @@ const server = http.createServer((req, res) => {
 
   // Security headers on every response (M9). style-src keeps 'unsafe-inline'
   // only because KaTeX emits inline styles; script-src stays strict.
+  // NOTE: no X-Frame-Options — CSP frame-ancestors governs framing, and a DENY
+  // here would block the sandbox live-preview iframe.
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; " +
-    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    `base-uri 'none'; form-action 'none'; frame-ancestors ${FRAME_ANCESTORS}`);
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
 
