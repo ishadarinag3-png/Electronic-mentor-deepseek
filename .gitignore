@@ -13,3 +13,6 @@ node_modules/
 # Test / build output
 coverage/
 dist/
+
+# Server-side history store (track 3) — never commit conversations or the signing secret
+.data/

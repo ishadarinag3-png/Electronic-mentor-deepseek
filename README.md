@@ -61,8 +61,9 @@ index.html            semantic, accessible shell (split out of the old monolith)
 styles.css            design tokens, dark+light themes, contrast-verified
 app.js                frontend: streaming, sanitised markdown, lazy KaTeX, a11y
 server.mjs            zero-dep Node proxy + static host + security headers
-lib/demo-mentor.js   offline FAQ used when no API key is set
+lib/demo-mentor.js    offline FAQ used when no API key is set
 lib/sanitize-config.js  the ONE markdown/DOMPurify config, shared with tests
+lib/prompts.js        curated starter questions, shared with the tests
 sw.js                 network-first service worker (offline shell)
 manifest.webmanifest  installable-PWA manifest
 public/               generated app icons (192 / 512 / maskable / apple-touch)
@@ -106,8 +107,15 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on every push and PR.
   `Permissions-Policy`.
 - **Abuse controls** — per-IP token bucket (20 msg/min), body-size cap,
   message-count and per-message length caps before anything reaches the model.
+- **Anonymous history, no accounts** — `GET/PUT/DELETE /api/history` bind a
+  conversation to an HMAC-signed random device token in an `HttpOnly; SameSite=Lax`
+  cookie (keyed server-side by its sha256). No passwords, emails or PII are stored;
+  the store is a single atomic-written JSON file under `.data/` (git-ignored),
+  signed by `EM_HISTORY_SECRET` (auto-generated if unset). Per-token write rate
+  limits and the same shape-whitelisting as `/api/chat` apply.
 - **No path traversal** — static serving is confined to the project root and
-  refuses to expose `server.mjs`, `lib/`, `.env`, lockfiles and dotfiles.
+  refuses to expose `server.mjs`, `.data/`, `.env`, lockfiles and dotfiles.
+  (`lib/` *is* served: it holds the isomorphic modules the browser imports.)
 
 ---
 
@@ -123,7 +131,12 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on every push and PR.
   theme follows the OS until you choose, then persists.
 - Streaming replies with a Stop button, in-flight lock, offline banner,
   per-message Copy / Regenerate, conversation Export and Clear.
-- History persists across reloads (capped at 100 messages).
+- History persists across reloads (capped at 100 messages) and, when a server
+  exists, syncs to it anonymously — newest-wins reconciliation, localStorage
+  fallback offline.
+- Starter-question chips (curriculum-aligned, test-verified to always answer)
+  appear whenever the transcript is empty; **Save as PDF** uses the print
+  stylesheet with a branded header — no PDF library needed.
 
 ---
 
@@ -132,13 +145,17 @@ CI (`.github/workflows/ci.yml`) runs lint + tests on every push and PR.
 The current code implements the findings in [`AUDIT.md`](AUDIT.md) —
 see its §10 for a per-finding implementation table.
 
+Done since the audit: starter prompt library, Save-as-PDF export, and anonymous
+server-side history (track 3 of the roadmap).
+
 Open ideas, in rough order:
 
 - Hindi / Punjabi UI strings and a language toggle (the IME fix already makes
   Devanagari *input* work).
-- Server-side conversation storage + accounts (today history is device-local,
-  which is also a privacy feature).
-- Swap the in-memory rate-limit bucket for Redis when running multiple replicas.
+- Swap the in-memory rate-limit bucket (and the `.data/` JSON store) for Redis /
+  Postgres when running multiple replicas.
+- Opt-in named accounts on top of the device-token identity, if cross-device
+  sync is ever requested (a privacy decision, not a default).
 - PNG icon variants per platform if a store listing is ever needed.
 
 ---
