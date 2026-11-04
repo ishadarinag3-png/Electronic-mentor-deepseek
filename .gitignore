@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit (AUDIT.md C2 / L3)
+.env
+.env.*
+!.env.example
+
+# Logs & OS cruft
+*.log
+.DS_Store
+
+# Test / build output
+coverage/
+dist/

@@ -1,0 +1,20 @@
+{
+  "name": "Electronics Mentor",
+  "short_name": "ElecMentor",
+  "description": "A patient AI tutor for circuits, components and electronics calculations.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "categories": ["education", "productivity"],
+  "lang": "en",
+  "icons": [
+    { "src": "public/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "public/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "public/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

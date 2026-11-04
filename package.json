@@ -1,0 +1,19 @@
+{
+  "name": "electronic-mentor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electronics Mentor — an AI tutor for circuits, components and electronics calculations, with a zero-dependency Node proxy that keeps the model API key server-side.",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "lint": "html-validate index.html",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "html-validate": "^8.24.0",
+    "jsdom": "^24.1.0"
+  }
+}

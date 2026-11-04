@@ -3,131 +3,120 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
+  <title>Electronics Mentor</title>
+  <meta name="description" content="Electronics Mentor — a patient AI tutor for circuits, components and electronics calculations. Ask anything from Ohm's law to op-amp design.">
+  <meta name="color-scheme" content="dark light">
+
+  <!-- M3: a real, finished PWA instead of half-configured meta tags -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Electronics Mentor</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, system-ui, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      padding: 20px;
-      padding-top: env(safe-area-inset-top, 20px);
-      padding-bottom: env(safe-area-inset-bottom, 20px);
-    }
-    h1 {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 4px;
-      color: #f59e0b;
-    }
-    .sub {
-      font-size: 13px;
-      color: #94a3b8;
-      margin-bottom: 24px;
-    }
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      margin-bottom: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .msg {
-      padding: 10px 14px;
-      border-radius: 14px;
-      max-width: 85%;
-      font-size: 15px;
-      line-height: 1.4;
-      word-wrap: break-word;
-    }
-    .msg.user {
-      background: #f59e0b;
-      color: #0f172a;
-      align-self: flex-end;
-      font-weight: 500;
-    }
-    .msg.bot {
-      background: #1e293b;
-      color: #e2e8f0;
-      align-self: flex-start;
-    }
-    #input-row {
-      display: flex;
-      gap: 8px;
-    }
-    #input {
-      flex: 1;
-      padding: 12px 16px;
-      border-radius: 12px;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #e2e8f0;
-      font-size: 16px;
-      outline: none;
-    }
-    #input:focus {
-      border-color: #f59e0b;
-    }
-    #send {
-      padding: 12px 20px;
-      border-radius: 12px;
-      border: none;
-      background: #f59e0b;
-      color: #0f172a;
-      font-weight: 600;
-      font-size: 16px;
-    }
-    #send:active {
-      opacity: 0.7;
-    }
-  </style>
+  <meta name="apple-mobile-web-app-title" content="Elec Mentor">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+
+  <!-- M5: real icons; no more /favicon.ico 404 -->
+  <link rel="icon" type="image/png" sizes="192x192" href="public/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="public/apple-touch-icon.png">
+
+  <!-- Open Graph, so shares show something sane (L1) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Electronics Mentor">
+  <meta property="og:description" content="A patient AI tutor for circuits, components and electronics calculations.">
+  <meta property="og:image" content="public/icon-512.png">
+
+  <link rel="stylesheet" href="styles.css">
+  <!-- KaTeX CSS is injected lazily by app.js only when a message actually contains maths. -->
 </head>
 <body>
-  <h1>Electronics Mentor</h1>
-  <div class="sub">Step 5 — skeleton only</div>
+  <a class="skip-link" href="#input">Skip to message input</a>
 
-  <div id="messages"></div>
+  <div class="app">
+    <header>
+      <div class="title-row">
+        <div>
+          <h1>Electronics Mentor</h1>
+          <p class="sub">Your patient tutor for circuits, components &amp; calculations</p>
+        </div>
+        <div class="header-actions" role="group" aria-label="Conversation controls" style="display:flex;gap:8px;flex:none">
+          <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="false" title="Toggle theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+          </button>
+          <button class="icon-btn" id="export" type="button" aria-label="Export conversation as Markdown" title="Export as Markdown">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
+          </button>
+          <button class="icon-btn" id="clear" type="button" aria-label="Clear conversation" title="Clear conversation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
 
-  <div id="input-row">
-    <input id="input" type="text" placeholder="Type a message..." autocomplete="off">
-    <button id="send">Send</button>
+    <!-- M6: the old page was a silent dead end without JavaScript -->
+    <noscript>
+      <p class="banner banner--warn">
+        <strong>JavaScript is required.</strong>
+        Electronics Mentor runs entirely in your browser. Please enable JavaScript, or send your
+        question by email to <a href="mailto:mentor@example.com" style="color:inherit">mentor@example.com</a>
+        and we will answer it for you.
+      </p>
+    </noscript>
+
+    <!-- Offline notice (H6) -->
+    <p class="banner banner--error" id="offline-banner" role="status" hidden>
+      <span aria-hidden="true">⚠</span>
+      <span><strong>You appear to be offline.</strong> Messages cannot be sent until the connection returns.</span>
+    </p>
+
+    <!-- Demo-mode notice, shown when the server has no API key (see README) -->
+    <p class="banner banner--warn" id="demo-banner" role="status" hidden>
+      <span aria-hidden="true">⚙</span>
+      <span><strong>Demo mode.</strong> No <code>DEEPSEEK_API_KEY</code> is configured on the server, so
+      replies come from a small built-in electronics FAQ — <em>not</em> a language model. Set the key to
+      enable the real DeepSeek tutor.</span>
+    </p>
+
+    <!-- H1: the transcript is now a polite live region and keyboard-scrollable -->
+    <main id="messages"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Conversation with Electronics Mentor"
+          tabindex="0"></main>
+
+    <form id="composer" autocomplete="off">
+      <!-- H2: a real accessible name, not just a placeholder -->
+      <label class="visually-hidden" for="input">Message Electronics Mentor</label>
+      <textarea id="input"
+                rows="1"
+                placeholder="Ask about a circuit, component or calculation…"
+                aria-describedby="input-hint"
+                maxlength="8000"
+                enterkeyhint="send"></textarea>
+
+      <!-- H7: Stop appears while a reply is streaming -->
+      <button id="stop" type="button" hidden aria-label="Stop generating the reply">
+        <svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+        Stop
+      </button>
+
+      <!-- M2: explicit type, so this can never become an accidental form-submitter -->
+      <button id="send" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></svg>
+        Send
+      </button>
+    </form>
+
+    <div class="composer-foot">
+      <span id="input-hint">
+        <kbd>Enter</kbd> send · <span class="hint-shift"><kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+      </span>
+      <span id="engine-label" role="status" aria-live="polite">Connecting…</span>
+    </div>
   </div>
 
-  <script>
-    const messages = document.getElementById('messages');
-    const input = document.getElementById('input');
-    const send = document.getElementById('send');
-
-    function addMessage(text, who) {
-      const div = document.createElement('div');
-      div.className = 'msg ' + who;
-      div.textContent = text;
-      messages.appendChild(div);
-      messages.scrollTop = messages.scrollHeight;
-    }
-
-    function handleSend() {
-      const text = input.value.trim();
-      if (!text) return;
-      addMessage(text, 'user');
-      input.value = '';
-      setTimeout(() => {
-        addMessage('(echo) ' + text, 'bot');
-      }, 300);
-    }
-
-    send.addEventListener('click', handleSend);
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') handleSend();
-    });
-
-    addMessage('Hi! I am not smart yet. Type anything and I will echo it back.', 'bot');
-  </script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
