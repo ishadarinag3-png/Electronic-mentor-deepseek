@@ -33,6 +33,12 @@
 <body>
   <a class="skip-link" href="#input">Skip to message input</a>
 
+  <!-- Print-only branded header, populated on beforeprint (see app.js) -->
+  <div class="print-header" aria-hidden="true">
+    <strong>Electronics Mentor — conversation transcript</strong>
+    <span id="print-meta"></span>
+  </div>
+
   <div class="app">
     <header>
       <div class="title-row">
@@ -43,6 +49,9 @@
         <div class="header-actions" role="group" aria-label="Conversation controls" style="display:flex;gap:8px;flex:none">
           <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="false" title="Toggle theme">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+          </button>
+          <button class="icon-btn" id="print" type="button" aria-label="Save conversation as PDF" title="Save as PDF">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2m-10-2h10v6H7z"/></svg>
           </button>
           <button class="icon-btn" id="export" type="button" aria-label="Export conversation as Markdown" title="Export as Markdown">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
@@ -85,6 +94,9 @@
           aria-relevant="additions"
           aria-label="Conversation with Electronics Mentor"
           tabindex="0"></main>
+
+    <!-- Starter prompts: tappable curriculum-aligned openers when the chat is empty -->
+    <div id="starters" class="starters" role="group" aria-label="Suggested starter questions" hidden></div>
 
     <form id="composer" autocomplete="off">
       <!-- H2: a real accessible name, not just a placeholder -->

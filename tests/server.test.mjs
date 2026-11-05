@@ -5,6 +5,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -12,12 +15,21 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = 8123;
 const BASE = `http://127.0.0.1:${PORT}`;
 let child;
+let dataDir;
+
+const cookieFrom = (res) => {
+  const sc = res.headers.get('set-cookie');
+  return sc ? sc.split(';')[0] : null;
+};
 
 before(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), 'em-history-'));
   child = spawn(process.execPath, ['server.mjs'], {
     cwd: ROOT,
     // E2B_SANDBOX_ID cleared so frame-ancestors is deterministically 'none' here.
-    env: { ...process.env, PORT: String(PORT), DEEPSEEK_API_KEY: '', E2B_SANDBOX_ID: '' },
+    // EM_DATA_DIR keeps the history store out of the working tree.
+    env: { ...process.env, PORT: String(PORT), DEEPSEEK_API_KEY: '',
+           E2B_SANDBOX_ID: '', EM_DATA_DIR: dataDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Wait for the listen line.
@@ -30,7 +42,10 @@ before(async () => {
   });
 });
 
-after(() => { child?.kill('SIGKILL'); });
+after(async () => {
+  child?.kill('SIGKILL');
+  if (dataDir) await rm(dataDir, { recursive: true, force: true });
+});
 
 test('GET / serves the shell with security headers (M9)', async () => {
   const res = await fetch(`${BASE}/`);
@@ -152,6 +167,94 @@ test('every module the browser imports is servable (module graph)', async () => 
   for (const p of ['/styles.css', '/manifest.webmanifest', '/sw.js', '/public/icon-192.png']) {
     assert.equal((await fetch(BASE + p)).status, 200, `${p} must be servable`);
   }
+});
+
+/* ---------------- anonymous server-side history (track 3) ---------------- */
+
+test('GET /api/history mints an anonymous HttpOnly device token', async () => {
+  const res = await fetch(`${BASE}/api/history`);
+  assert.equal(res.status, 200);
+  const sc = res.headers.get('set-cookie') || '';
+  assert.match(sc, /em_tok=/);
+  assert.match(sc, /HttpOnly/i);
+  assert.match(sc, /SameSite=Lax/i);
+  assert.deepEqual((await res.json()).messages, []);
+});
+
+test('history PUT then GET round-trips for the same token', async () => {
+  const mint = await fetch(`${BASE}/api/history`);
+  const cookie = cookieFrom(mint); await mint.text();
+  assert.ok(cookie, 'expected a device token cookie');
+
+  const msgs = [{ role: 'user', content: 'ohms law', ts: 1 },
+                { role: 'assistant', content: 'V = IR', ts: 2 }];
+  const put = await fetch(`${BASE}/api/history`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ messages: msgs }),
+  });
+  assert.equal(put.status, 200);
+
+  const get = await fetch(`${BASE}/api/history`, { headers: { Cookie: cookie } });
+  assert.deepEqual((await get.json()).messages, msgs);
+});
+
+test('one device token cannot read another token\u2019s history', async () => {
+  const a = await fetch(`${BASE}/api/history`); const ca = cookieFrom(a); await a.text();
+  const b = await fetch(`${BASE}/api/history`); const cb = cookieFrom(b); await b.text();
+  assert.notEqual(ca, cb);
+
+  await fetch(`${BASE}/api/history`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: ca },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'secret plan', ts: 5 }] }),
+  });
+  const rb = await fetch(`${BASE}/api/history`, { headers: { Cookie: cb } });
+  assert.deepEqual((await rb.json()).messages, [], 'cross-token leak');
+});
+
+test('tampered token signatures are rejected and re-minted', async () => {
+  const res = await fetch(`${BASE}/api/history`, { headers: { Cookie: 'em_tok=abc.def' } });
+  assert.equal(res.status, 200);
+  assert.ok(res.headers.get('set-cookie'), 'expected a fresh token cookie');
+  assert.deepEqual((await res.json()).messages, []);
+});
+
+test('history PUT whitelists message shape', async () => {
+  const m = await fetch(`${BASE}/api/history`); const c = cookieFrom(m); await m.text();
+
+  const notArray = await fetch(`${BASE}/api/history`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: c },
+    body: '{"messages":{}}',
+  });
+  assert.equal(notArray.status, 400);
+
+  const junk = await fetch(`${BASE}/api/history`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: c },
+    body: JSON.stringify({ messages: [
+      { role: 'system', content: 'injected', ts: 1 },   // dropped
+      { role: 'user', content: 7, ts: 2 },              // dropped (not a string)
+    ] }),
+  });
+  assert.equal(junk.status, 200);
+  const after = await fetch(`${BASE}/api/history`, { headers: { Cookie: c } });
+  assert.deepEqual((await after.json()).messages, [], 'invalid entries must not persist');
+});
+
+test('DELETE clears the stored history', async () => {
+  const m = await fetch(`${BASE}/api/history`); const c = cookieFrom(m); await m.text();
+  await fetch(`${BASE}/api/history`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: c },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'x', ts: 9 }] }),
+  });
+  assert.equal((await fetch(`${BASE}/api/history`, { method: 'DELETE', headers: { Cookie: c } })).status, 200);
+  const get = await fetch(`${BASE}/api/history`, { headers: { Cookie: c } });
+  assert.deepEqual((await get.json()).messages, []);
+});
+
+test('the .data history store is not servable over HTTP', async () => {
+  const r = await fetch(`${BASE}/.data/history.json`);
+  assert.ok(r.status === 403 || r.status === 404, `.data leaked: ${r.status}`);
 });
 
 // NOTE: keep last — it exhausts the per-IP rate bucket for this process.

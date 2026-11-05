@@ -13,8 +13,9 @@
    ========================================================================== */
 
 import http from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize, sep } from 'node:path';
+import crypto from 'node:crypto';
+import { readFile, stat, writeFile, mkdir, rename } from 'node:fs/promises';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { answerFor } from './lib/demo-mentor.js';
@@ -58,7 +59,7 @@ const MIME = {
 // NOTE: /lib/ is intentionally NOT denied — it holds the isomorphic modules the
 // browser imports (sanitize-config, demo-mentor). Server-only files stay denied.
 const DENY = ['/tests/', '/.git', '/node_modules', '/server.mjs',
-              '/package-lock.json', '/.env', '/AUDIT.md'];
+              '/package-lock.json', '/.env', '/AUDIT.md', '/.data'];
 
 /* ------------------------------------------------------------ rate limit */
 // Token bucket per IP: 20 requests / rolling minute. Swap for Redis in prod.
@@ -70,6 +71,107 @@ function rateLimited(ip) {
   if (buckets.size > 10_000) buckets.clear();      // crude memory guard
   b.n += 1;
   return b.n > 20;
+}
+
+/* ------------------------------------------------- anonymous history store */
+/* Track 3: server-side conversation history with NO accounts and NO PII.
+   Each browser gets an HMAC-signed random device token in an HttpOnly cookie;
+   conversations are keyed by the token's sha256. Storage is a single JSON file
+   behind an atomic write, so the zero-dependency character is preserved and
+   the store can later be swapped for a real database without touching routes. */
+
+// Overridable so tests keep their store out of the working tree.
+const DATA_DIR = process.env.EM_DATA_DIR ? resolve(process.env.EM_DATA_DIR) : join(ROOT, '.data');
+const HISTORY_FILE = join(DATA_DIR, 'history.json');
+const COOKIE = 'em_tok';
+const HISTORY_MAX_MSGS = 100;
+const HISTORY_MAX_LEN = 8000;
+
+let secret = process.env.EM_HISTORY_SECRET || '';
+let store = new Map();            // tokenHash -> { updated, messages }
+let storeLoaded = false;
+let saveQueued = false;
+const hBuckets = new Map();       // per-token write rate limit
+
+async function ensureSecret() {
+  if (secret) return secret;
+  await mkdir(DATA_DIR, { recursive: true });
+  const f = join(DATA_DIR, 'secret');
+  try {
+    secret = (await readFile(f, 'utf8')).trim();
+    if (!secret) throw new Error('empty');
+  } catch {
+    secret = crypto.randomBytes(32).toString('hex');
+    await writeFile(f, secret, { mode: 0o600 });
+  }
+  return secret;
+}
+
+async function loadStore() {
+  if (storeLoaded) return store;
+  storeLoaded = true;
+  try {
+    store = new Map(Object.entries(JSON.parse(await readFile(HISTORY_FILE, 'utf8'))));
+  } catch { store = new Map(); }
+  return store;
+}
+
+function persistStore() {
+  if (saveQueued) return;
+  saveQueued = true;
+  setImmediate(async () => {
+    saveQueued = false;
+    try {
+      await mkdir(DATA_DIR, { recursive: true });
+      const tmp = `${HISTORY_FILE}.tmp`;
+      await writeFile(tmp, JSON.stringify(Object.fromEntries(store)));
+      await rename(tmp, HISTORY_FILE);          // atomic: readers never see half a file
+    } catch { /* disk trouble: the in-memory copy still serves this process */ }
+  });
+}
+
+const signTok = (tok, sec) =>
+  crypto.createHmac('sha256', sec).update(tok).digest('hex').slice(0, 32);
+const hashTok = (tok) => crypto.createHash('sha256').update(tok).digest('hex');
+
+function parseCookies(req) {
+  const out = {};
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+
+/** Resolve (or mint) the anonymous device identity for this client. */
+async function deviceId(req, res) {
+  const sec = await ensureSecret();
+  const got = parseCookies(req)[COOKIE];
+  if (got && got.includes('.')) {
+    const cut = got.lastIndexOf('.');
+    const tok = got.slice(0, cut);
+    const sig = got.slice(cut + 1);
+    const want = signTok(tok, sec);
+    if (tok && sig.length === want.length) {
+      try {
+        if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return hashTok(tok);
+      } catch { /* fall through to minting a fresh token */ }
+    }
+  }
+  const tok = crypto.randomBytes(24).toString('base64url');
+  const secure = (req.headers['x-forwarded-proto'] === 'https' || req.socket?.encrypted) ? '; Secure' : '';
+  res.setHeader('Set-Cookie',
+    `${COOKIE}=${tok}.${signTok(tok, sec)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`);
+  return hashTok(tok);
+}
+
+function historyRateLimited(id) {
+  const now = Date.now();
+  let b = hBuckets.get(id);
+  if (!b || now - b.start > 60_000) { b = { start: now, n: 0 }; hBuckets.set(id, b); }
+  if (hBuckets.size > 10_000) hBuckets.clear();
+  b.n += 1;
+  return b.n > 60;
 }
 
 /* ------------------------------------------------------------ helpers */
@@ -236,7 +338,7 @@ async function handleChat(req, res, ip) {
 
 /* ------------------------------------------------------------ server */
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const ip = req.socket.remoteAddress || 'unknown';
 
   // Security headers on every response (M9). style-src keeps 'unsafe-inline'
@@ -258,6 +360,52 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { demo: !KEY, model: KEY ? MODEL : null });
   }
   if (path === '/api/chat' && req.method === 'POST') return handleChat(req, res, ip);
+
+  /* ---------------- anonymous conversation history ---------------- */
+  if (path === '/api/history') {
+    if (req.method === 'GET') {
+      const id = await deviceId(req, res);
+      const rec = (await loadStore()).get(id);
+      return json(res, 200, { messages: rec?.messages ?? [] });
+    }
+    if (req.method === 'DELETE') {
+      const id = await deviceId(req, res);
+      (await loadStore()).delete(id);
+      persistStore();
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'PUT') {
+      const id = await deviceId(req, res);
+      if (historyRateLimited(id)) {
+        await drain(req);
+        return json(res, 429, { error: 'Too many saves. Please slow down.' });
+      }
+      let raw;
+      try { raw = await readBody(req, 1_500_000); }
+      catch (e) {
+        await drain(req);
+        return json(res, 413, { error: 'History too large.' }, { Connection: 'close' });
+      }
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch { return json(res, 400, { error: 'Invalid JSON body.' }); }
+      if (!parsed || !Array.isArray(parsed.messages)) {
+        return json(res, 400, { error: 'messages must be an array.' });
+      }
+      const msgs = parsed.messages
+        .filter((m) => m && ['user', 'assistant'].includes(m.role)
+                    && typeof m.content === 'string' && typeof m.ts === 'number')
+        .slice(-HISTORY_MAX_MSGS)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, HISTORY_MAX_LEN),
+                       ts: Math.trunc(m.ts) }));
+      (await loadStore()).set(id, { updated: Date.now(), messages: msgs });
+      persistStore();
+      return json(res, 200, { ok: true, count: msgs.length });
+    }
+    res.setHeader('Allow', 'GET, PUT, DELETE');
+    return json(res, 405, { error: 'Method not allowed.' });
+  }
+
   if (path.startsWith('/api/')) return json(res, 404, { error: 'Unknown endpoint.' });
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD, POST');

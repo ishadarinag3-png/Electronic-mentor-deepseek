@@ -12,6 +12,7 @@
 import { marked } from './vendor/marked.esm.js';
 import DOMPurify from './vendor/purify.es.js';
 import { MARKED_OPTIONS, PURIFY_CFG, SAFE_HREF } from './lib/sanitize-config.js';
+import { STARTERS } from './lib/prompts.js';
 
 /* ------------------------------------------------------------------ config */
 
@@ -42,6 +43,7 @@ const offlineB    = $('#offline-banner');
 const demoB       = $('#demo-banner');
 const engineLabel = $('#engine-label');
 const themeBtn    = $('#theme-toggle');
+const startersEl  = $('#starters');
 
 /* ------------------------------------------------------------------ state */
 
@@ -56,20 +58,82 @@ const handles = new WeakMap(); // message object -> bubble handle (for action re
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
+const isValidMsg = (m) => m && ['user', 'assistant'].includes(m.role)
+                       && typeof m.content === 'string' && typeof m.ts === 'number';
+
 function loadHistory() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
     if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((m) => m && ['user', 'assistant'].includes(m.role)
-                  && typeof m.content === 'string' && typeof m.ts === 'number')
-      .slice(-MAX_SAVED);
+    return raw.filter(isValidMsg).slice(-MAX_SAVED);
   } catch { return []; }      // corrupt / private mode: start clean, never throw
 }
 
 function saveHistory() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(history.slice(-MAX_SAVED))); }
   catch { /* quota or private mode: degrade silently, never break the chat (H5) */ }
+  pushServerHistory();        // debounced mirror to the server, when one exists
+}
+
+/* ------------------------------------------- server-side history (track 3) */
+/* The server issues an anonymous, HMAC-signed device token in an HttpOnly
+   cookie. No accounts, no PII: conversations bind to the token only. On a
+   static host (no /api) everything degrades to localStorage. */
+
+let serverHistoryAvailable = false;
+let syncTimer = null;
+
+function pushServerHistory() {
+  if (!serverHistoryAvailable) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    fetch('api/history', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: history.slice(-MAX_SAVED) }),
+    }).catch(() => { /* offline: the local copy stays authoritative here */ });
+  }, 700);
+}
+
+/** Returns the server's message list, or null when no backend exists. */
+async function pullServerHistory() {
+  try {
+    const res = await fetch('api/history');
+    if (!res.ok) return null;
+    const data = await res.json();
+    serverHistoryAvailable = true;
+    return Array.isArray(data.messages) ? data.messages.filter(isValidMsg).slice(-MAX_SAVED) : [];
+  } catch { return null; }
+}
+
+function forgetServerHistory() {
+  if (!serverHistoryAvailable) return;
+  clearTimeout(syncTimer);                 // don't let a queued PUT resurrect it
+  fetch('api/history', { method: 'DELETE' }).catch(() => { /* best effort */ });
+}
+
+/* ---------------------------------------------------------------- starters */
+
+function renderStarters() {
+  const show = history.length === 0;
+  startersEl.hidden = !show;
+  if (!show || startersEl.childElementCount) return;
+  for (const s of STARTERS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'starter';
+    b.textContent = s.label;
+    b.title = s.text;
+    b.addEventListener('click', () => { startersEl.hidden = true; sendUserText(s.text); });
+    startersEl.appendChild(b);
+  }
+}
+
+/* ---------------------------------------------------------------- print/PDF */
+
+function fillPrintMeta() {
+  const meta = document.getElementById('print-meta');
+  if (meta) meta.textContent = `${new Date().toLocaleString()} \u00b7 ${history.length} messages`;
 }
 
 /** M7: only follow the tail when the reader is already near the bottom. */
@@ -248,6 +312,7 @@ function demotePreviousAssistant() {
 function renderAll() {
   messages.replaceChildren();
   for (const m of history) attachActions(addBubble(m), m);
+  renderStarters();
   scrollToBottom(true);
 }
 
@@ -333,6 +398,7 @@ async function sendUserText(text) {
   history.push(userMsg);
   saveHistory();
   addBubble(userMsg).setActions([]);
+  renderStarters();
   scrollToBottom(true);
 
   const botHandle = addBubble({ role: 'assistant', content: '' });
@@ -502,8 +568,17 @@ $('#clear').addEventListener('click', () => {
   if (!confirm('Clear the whole conversation? This cannot be undone.')) return;
   history = [];
   saveHistory();
+  forgetServerHistory();
   renderAll();
   input.focus();
+});
+
+/* Save-as-PDF via the print stylesheet (no PDF library needed). */
+addEventListener('beforeprint', fillPrintMeta);
+$('#print').addEventListener('click', () => {
+  if (!history.length) return;
+  fillPrintMeta();
+  window.print();
 });
 
 themeBtn.addEventListener('click', () =>
@@ -552,6 +627,23 @@ async function boot() {
     }
   } catch { await enableClientDemo(); }
 
+  // Reconcile with server-side history (track 3) when a backend exists.
+  // Newest-last-timestamp wins; the loser is then uploaded so both converge.
+  const serverMsgs = await pullServerHistory();
+  if (serverMsgs) {
+    const localLast  = history.at(-1)?.ts ?? 0;
+    const serverLast = serverMsgs.at(-1)?.ts ?? 0;
+    if (serverMsgs.length && serverLast >= localLast
+        && JSON.stringify(serverMsgs) !== JSON.stringify(history)) {
+      history = serverMsgs;
+      saveHistory();
+      renderAll();
+    } else if (history.length && serverLast < localLast) {
+      pushServerHistory();
+    }
+  }
+
+  renderStarters();
   autosize();
   input.focus();
 
